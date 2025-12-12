@@ -1,62 +1,88 @@
 (require 'gptel)
 (require 'cl-lib)
 
-(defun my/gptel-context-to-clip ()
-  "Collects all active gptel context, formats it into markdown chunks with
-file/line metadata, and inserts it into a buffer named *clip*."
-  (interactive)
-  (let ((clip-buffer (get-buffer-create "*clip*"))
-        (context-strings '()))
-    
-    ;; Iterate over the gptel-context alist
-    ;; Structure is: ((#<buffer buf1> :overlays (#<overlay ...>)) ...)
-    (dolist (entry gptel-context)
-      (let* ((buf (car entry))
-             (props (cdr entry))
-             (overlays (plist-get props :overlays)))
-        
-        (when (buffer-live-p buf)
-          (with-current-buffer buf
-            (let ((source-name (or (buffer-file-name buf) (buffer-name buf))))
-              
-              ;; If there are overlays, process each one (Regions)
-              (if overlays
-                  (dolist (ov overlays)
-                    (let ((start (overlay-start ov))
-                          (end (overlay-end ov)))
-                      (when (and start end) ;; Ensure overlay is valid
-                        (let ((content (buffer-substring-no-properties start end))
-                              (line-info (format "Lines %d-%d"
-                                                 (line-number-at-pos start)
-                                                 (line-number-at-pos end))))
-                          (push (format "File: %s (%s)\n\n```\n%s\n```\n"
-                                        source-name
-                                        line-info
-                                        content)
-                                context-strings)))))
-                
-                ;; If no overlays, it implies the whole buffer is the context
-                ;; (Note: gptel usually adds overlays even for whole buffers, 
-                ;; but we handle the fallback just in case)
-                (let ((content (buffer-substring-no-properties (point-min) (point-max)))
-                      (line-info "Entire Buffer"))
-                  (push (format "File: %s (%s)\n\n```\n%s\n```\n"
-                                source-name
-                                line-info
-                                content)
-                        context-strings))))))))
+;;; --- Configuration ---
 
-    ;; Insert everything into the *clip* buffer
-    (with-current-buffer clip-buffer
-      (erase-buffer)
-      (insert (mapconcat #'identity (nreverse context-strings) "\n"))
-      (if (fboundp 'markdown-mode)
-          (markdown-mode)
-        (text-mode))
-      (goto-char (point-min)))
+(defgroup gptel-clip nil
+  "Settings for gptel-clip."
+  :group 'gptel)
+
+(defcustom gptel-clip-buffer-name "*clip*"
+  "Name of the buffer used for gptel context output."
+  :type 'string
+  :group 'gptel-clip)
+
+(defconst gptel-clip--format-string "File: %s (%s)\n\n```\n%s\n```\n"
+  "Format string for context entries. 
+Args: File Name, Line Info, Content.")
+
+;;; --- Internal Logic ---
+
+(defun gptel-clip--format-entry (source-name start end content)
+  "Format a single entry of code context."
+  (let ((line-info (if (and start end)
+                       (format "Lines %d-%d"
+                               (line-number-at-pos start)
+                               (line-number-at-pos end))
+                     "Entire Buffer")))
+    (format gptel-clip--format-string source-name line-info content)))
+
+(defun gptel-clip--extract-buffer-context (buf props)
+  "Extract formatted context strings from BUF based on PROPS."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (let ((source-name (or (buffer-file-name buf) (buffer-name buf)))
+            (overlays (plist-get props :overlays)))
+        (if overlays
+            ;; Case A: Specific Regions (Overlays)
+            (cl-loop for ov in overlays
+                     for start = (overlay-start ov)
+                     for end = (overlay-end ov)
+                     when (and start end)
+                     collect (gptel-clip--format-entry 
+                              source-name start end
+                              (buffer-substring-no-properties start end)))
+          ;; Case B: Entire Buffer
+          (list (gptel-clip--format-entry 
+                 source-name nil nil
+                 (buffer-substring-no-properties (point-min) (point-max)))))))))
+
+(defun my/gptel--get-formatted-context-string ()
+  "Helper function: Returns the formatted string of all gptel context."
+  (mapconcat #'identity
+             (cl-mapcan (lambda (entry)
+                          (gptel-clip--extract-buffer-context (car entry) (cdr entry)))
+                        gptel-context)
+             "\n"))
+
+;;; --- Commands ---
+
+(defun my/gptel-context-to-clip ()
+  "Collects gptel context, formats it, and inserts it into the clip buffer."
+  (interactive)
+  (let ((formatted-text (my/gptel--get-formatted-context-string))
+        (clip-buffer (get-buffer-create gptel-clip-buffer-name)))
     
-    (switch-to-buffer clip-buffer)
-    (message "Context copied to *clip*")))
+    (if (string-empty-p formatted-text)
+        (message "No gptel context found.")
+      (with-current-buffer clip-buffer
+        (erase-buffer)
+        (insert formatted-text)
+        (if (fboundp 'markdown-mode)
+            (markdown-mode)
+          (text-mode))
+        (goto-char (point-min)))
+      (switch-to-buffer clip-buffer)
+      (message "Context copied to %s" gptel-clip-buffer-name))))
+
+(defun my/gptel-context-to-clipboard ()
+  "Collects gptel context, formats it, and copies it to the system clipboard."
+  (interactive)
+  (let ((formatted-text (my/gptel--get-formatted-context-string)))
+    (if (string-empty-p formatted-text)
+        (message "No gptel context found.")
+      (kill-new formatted-text)
+      (message "Gptel context copied to clipboard! (%d chars)" (length formatted-text)))))
 
 ;;;###autoload
 (defun gptel-clip-export ()
