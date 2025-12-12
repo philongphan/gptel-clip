@@ -1,70 +1,75 @@
-;;; gptel-clip.el --- Export gptel context into a Markdown *clip* buffer -*- lexical-binding: t; -*-
-
-;; This file is independent glue code that reuses gptel's context collector.
-
-(require 'gptel-context)
-(require 'subr-x)
+(require 'gptel)
 (require 'cl-lib)
+(require 'eieio)
 
-(defgroup gptel-clip nil
-  "Export gptel context into a Markdown buffer."
-  :group 'gptel)
+(defun my/gptel-context-to-clip ()
+  "Collects all active gptel context, formats it into markdown chunks with
+file/line metadata, and inserts it into a buffer named *clip*."
+  (interactive)
+  (let ((clip-buffer (get-buffer-create "*clip*"))
+        (context-strings '()))
+    
+    ;; Iterate over each item in gptel's context list
+    (dolist (item gptel-context)
+      (let (source-name line-info content)
+        
+        ;; Determine the type of context and extract info
+        (cond
+         ;; Case 1: Region (Overlay)
+         ((and (object-of-class-p item 'gptel-context-region)
+               (slot-boundp item 'overlay))
+          (let* ((ov (oref item overlay))
+                 (buf (overlay-buffer ov)))
+            (when (buffer-live-p buf)
+              (with-current-buffer buf
+                (let ((start (overlay-start ov))
+                      (end (overlay-end ov)))
+                  (setq source-name (or (buffer-file-name buf) (buffer-name buf))
+                        line-info (format "Lines %d-%d"
+                                          (line-number-at-pos start)
+                                          (line-number-at-pos end))
+                        content (buffer-substring-no-properties start end)))))))
 
-(defcustom gptel-clip-buffer-name "*clip*"
-  "Name of the buffer that receives exported Markdown chunks."
-  :type 'string
-  :group 'gptel-clip)
+         ;; Case 2: Buffer
+         ((and (object-of-class-p item 'gptel-context-buffer)
+               (slot-boundp item 'buffer))
+          (let ((buf (get-buffer (oref item buffer))))
+            (when (buffer-live-p buf)
+              (with-current-buffer buf
+                (setq source-name (or (buffer-file-name) (buffer-name))
+                      line-info "Entire Buffer"
+                      content (buffer-substring-no-properties (point-min) (point-max)))))))
 
-(defcustom gptel-clip-clear-buffer t
-  "If non-nil, overwrite the *clip* buffer on each export."
-  :type 'boolean
-  :group 'gptel-clip)
+         ;; Case 3: File
+         ((and (object-of-class-p item 'gptel-context-file)
+               (slot-boundp item 'path))
+          (let ((path (oref item path)))
+            (when (file-exists-p path)
+              (setq source-name path
+                    line-info "Entire File"
+                    content (with-temp-buffer
+                              (insert-file-contents path)
+                              (buffer-string)))))))
+        
+        ;; Format the chunk if we successfully extracted content
+        (when (and source-name content)
+          (push (format "File: %s (%s)\n\n```\n%s\n```\n"
+                        source-name
+                        line-info
+                        content)
+                context-strings))))
 
-(defun gptel-clip--ensure-buffer ()
-  "Return the clip buffer, created if necessary."
-  (let ((buf (get-buffer-create gptel-clip-buffer-name)))
-    (with-current-buffer buf
-      (let ((inhibit-read-only t))
-        (unless (derived-mode-p 'markdown-mode)
-          (when (fboundp 'markdown-mode) (markdown-mode))))
-      (when gptel-clip-clear-buffer
-        (let ((inhibit-read-only t))
-          (erase-buffer))))
-    buf))
-
-(defun gptel-clip--insert-separator (firstp)
-  (unless firstp
-    (insert "\n\n")))
-
-(defun gptel-clip--insert-overlay-chunk (buf ov)
-  "Insert one chunk for overlay OV in BUF."
-  (with-current-buffer buf
-    (save-restriction
-      (widen)
-      (let* ((name (buffer-name buf))
-             (beg (overlay-start ov))
-             (end (overlay-end ov))
-             (l1 (and beg (line-number-at-pos beg t)))
-             (l2 (and end (line-number-at-pos end t)))
-             (text (and beg end (buffer-substring-no-properties beg end))))
-        (insert (format "### `%s` (lines %d-%d)\n\n" name (or l1 1) (or l2 1)))
-        (insert "```
-        (when text (insert text))
-        (unless (or (null text) (string-suffix-p "\n" text))
-          (insert "\n"))
-        (insert "```\n")))))
-
-(defun gptel-clip--insert-file-chunk (path)
-  "Insert one chunk for file PATH."
-  (let ((ident (file-name-nondirectory path)))
-    (insert (format "### `%s`\n\n" ident))
-    (insert "```
-    (let ((pm (point-marker)))
-      (set-marker-insertion-type pm t)
-      (insert-file-contents path)
-      (goto-char pm))
-    (unless (bolp) (insert "\n"))
-    (insert "```\n")))
+    ;; Insert everything into the *clip* buffer
+    (with-current-buffer clip-buffer
+      (erase-buffer)
+      (insert (mapconcat #'identity (nreverse context-strings) "\n"))
+      (if (fboundp 'markdown-mode)
+          (markdown-mode)
+        (text-mode))
+      (goto-char (point-min)))
+    
+    (switch-to-buffer clip-buffer)
+    (message "Context copied to *clip*")))
 
 ;;;###autoload
 (defun gptel-clip-export ()
