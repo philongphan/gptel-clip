@@ -1,6 +1,5 @@
 (require 'gptel)
 (require 'cl-lib)
-(require 'eieio)
 
 (defun my/gptel-context-to-clip ()
   "Collects all active gptel context, formats it into markdown chunks with
@@ -9,55 +8,43 @@ file/line metadata, and inserts it into a buffer named *clip*."
   (let ((clip-buffer (get-buffer-create "*clip*"))
         (context-strings '()))
     
-    ;; Iterate over each item in gptel's context list
-    (dolist (item gptel-context)
-      (let (source-name line-info content)
+    ;; Iterate over the gptel-context alist
+    ;; Structure is: ((#<buffer buf1> :overlays (#<overlay ...>)) ...)
+    (dolist (entry gptel-context)
+      (let* ((buf (car entry))
+             (props (cdr entry))
+             (overlays (plist-get props :overlays)))
         
-        ;; Determine the type of context and extract info
-        (cond
-         ;; Case 1: Region (Overlay)
-         ((and (object-of-class-p item 'gptel-context-region)
-               (slot-boundp item 'overlay))
-          (let* ((ov (oref item overlay))
-                 (buf (overlay-buffer ov)))
-            (when (buffer-live-p buf)
-              (with-current-buffer buf
-                (let ((start (overlay-start ov))
-                      (end (overlay-end ov)))
-                  (setq source-name (or (buffer-file-name buf) (buffer-name buf))
-                        line-info (format "Lines %d-%d"
-                                          (line-number-at-pos start)
-                                          (line-number-at-pos end))
-                        content (buffer-substring-no-properties start end)))))))
-
-         ;; Case 2: Buffer
-         ((and (object-of-class-p item 'gptel-context-buffer)
-               (slot-boundp item 'buffer))
-          (let ((buf (get-buffer (oref item buffer))))
-            (when (buffer-live-p buf)
-              (with-current-buffer buf
-                (setq source-name (or (buffer-file-name) (buffer-name))
-                      line-info "Entire Buffer"
-                      content (buffer-substring-no-properties (point-min) (point-max)))))))
-
-         ;; Case 3: File
-         ((and (object-of-class-p item 'gptel-context-file)
-               (slot-boundp item 'path))
-          (let ((path (oref item path)))
-            (when (file-exists-p path)
-              (setq source-name path
-                    line-info "Entire File"
-                    content (with-temp-buffer
-                              (insert-file-contents path)
-                              (buffer-string)))))))
-        
-        ;; Format the chunk if we successfully extracted content
-        (when (and source-name content)
-          (push (format "File: %s (%s)\n\n```\n%s\n```\n"
-                        source-name
-                        line-info
-                        content)
-                context-strings))))
+        (when (buffer-live-p buf)
+          (with-current-buffer buf
+            (let ((source-name (or (buffer-file-name buf) (buffer-name buf))))
+              
+              ;; If there are overlays, process each one (Regions)
+              (if overlays
+                  (dolist (ov overlays)
+                    (let ((start (overlay-start ov))
+                          (end (overlay-end ov)))
+                      (when (and start end) ;; Ensure overlay is valid
+                        (let ((content (buffer-substring-no-properties start end))
+                              (line-info (format "Lines %d-%d"
+                                                 (line-number-at-pos start)
+                                                 (line-number-at-pos end))))
+                          (push (format "File: %s (%s)\n\n```\n%s\n```\n"
+                                        source-name
+                                        line-info
+                                        content)
+                                context-strings)))))
+                
+                ;; If no overlays, it implies the whole buffer is the context
+                ;; (Note: gptel usually adds overlays even for whole buffers, 
+                ;; but we handle the fallback just in case)
+                (let ((content (buffer-substring-no-properties (point-min) (point-max)))
+                      (line-info "Entire Buffer"))
+                  (push (format "File: %s (%s)\n\n```\n%s\n```\n"
+                                source-name
+                                line-info
+                                content)
+                        context-strings))))))))
 
     ;; Insert everything into the *clip* buffer
     (with-current-buffer clip-buffer
