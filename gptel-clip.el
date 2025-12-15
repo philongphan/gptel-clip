@@ -12,7 +12,13 @@
   :type 'string
   :group 'gptel-clip)
 
-(defconst gptel-clip--format-string "File: %s (%s)\n\n```\n%s\n```\n"
+(defcustom gptel-clip-system-prompt-file 
+  (expand-file-name "system_prompt.md" (file-name-directory (or load-file-name buffer-file-name)))
+  "Path to the system prompt file to prepend to the clip buffer."
+  :type 'file
+  :group 'gptel-clip)
+
+(defconst gptel-clip--format-string "### File: %s (%s)\n\n```\n%s\n```\n"
   "Format string for context entries. 
 Args: File Name, Line Info, Content.")
 
@@ -56,7 +62,6 @@ Args: File Name, Line Info, Content.")
              "\n"))
 
 ;;; --- Commands ---
-
 (defun my/gptel-context-to-clip ()
   "Collects gptel context, formats it, and inserts it into the clip buffer."
   (interactive)
@@ -67,12 +72,29 @@ Args: File Name, Line Info, Content.")
         (message "No gptel context found.")
       (with-current-buffer clip-buffer
         (erase-buffer)
+        
+        ;; --- Insert System Prompt ---
+        (when (and gptel-clip-system-prompt-file
+                   (file-exists-p gptel-clip-system-prompt-file))
+          (insert-file-contents gptel-clip-system-prompt-file)
+          (goto-char (point-max))
+          ;; Ensure separation between prompt and context
+          (unless (eq (char-before) ?\n)
+            (insert "\n"))
+          (insert "\n")
+          (insert "## Context")
+          (insert "\n"))
+        ;; ----------------------------
+
         (insert formatted-text)
+        (insert "\n")
+          (insert "## Tasks")
+        (insert "\n")
         (if (fboundp 'markdown-mode)
             (markdown-mode)
-          (text-mode))
-        (goto-char (point-min)))
+          (text-mode)))
       (switch-to-buffer clip-buffer)
+      (goto-char (point-max))
       (message "Context copied to %s" gptel-clip-buffer-name))))
 
 (defun my/gptel-context-to-clipboard ()
@@ -83,6 +105,8 @@ Args: File Name, Line Info, Content.")
         (message "No gptel context found.")
       (kill-new formatted-text)
       (message "Gptel context copied to clipboard! (%d chars)" (length formatted-text)))))
+
+(provide 'gptel-clip)
 
 ;;;###autoload
 (defun gptel-clip-export ()
