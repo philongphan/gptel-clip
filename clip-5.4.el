@@ -30,6 +30,64 @@
   (message "Copied *clip* to clipboard. Press C-y to yank in Emacs.")
   (quit-window t))
 
+(defun gptel-clip--insert-style ()
+  (insert "# STYLE\n\n"
+          "- Return code of full files\n"
+          "- Instead of explanation, write at the end a git commit message with what has been changed\n"
+          "- For each file, you must add a file header above the code\n\n"))
+
+(defun gptel-clip--insert-context (contexts)
+  "Insert the CONTEXT section for CONTEXTS. Return non-nil if anything was rendered."
+  (insert "# CONTEXT\n\n")
+  (let (rendered)
+    (pcase-dolist (`(,source . ,data) contexts)
+      (cond
+       ((bufferp source)
+        (let* ((file (or (buffer-file-name source)
+                         (format "[buffer] %s" (buffer-name source))))
+               (lang (format "%s"
+                             (gptel--strip-mode-suffix
+                              (buffer-local-value 'major-mode source))))
+               (ovs (seq-filter #'overlayp
+                                (or (gptel-clip--entry-get data :overlays)
+                                    data))))
+          (if ovs
+              (dolist (ov ovs)
+                (setq rendered t)
+                (gptel-clip--insert-block
+                 file
+                 (with-current-buffer source
+                   (save-restriction
+                     (widen)
+                     (buffer-substring-no-properties
+                      (overlay-start ov) (overlay-end ov))))
+                 lang))
+            (when (buffer-live-p source)
+              (setq rendered t)
+              (gptel-clip--insert-block
+               file
+               (with-current-buffer source
+                 (save-restriction
+                   (widen)
+                   (buffer-substring-no-properties (point-min) (point-max))))
+               lang)))))
+       ((and (stringp source)
+             (not (gptel-clip--entry-get data :mime)))
+        (setq rendered t)
+        (gptel-clip--insert-block
+         source
+         (with-temp-buffer
+           (insert-file-contents source)
+           (buffer-string))
+         (or (file-name-extension source) "")))))
+    (unless rendered
+      (insert "_No active gptel context._\n\n"))
+    rendered))
+
+(defun gptel-clip--insert-task (saved-task)
+  (insert "# TASK\n")
+  (insert (or saved-task "\n")))
+
 (defun gptel-clip ()
   (interactive)
   (require 'gptel)
@@ -44,43 +102,9 @@
       (let ((inhibit-read-only t))
         (erase-buffer)
         (markdown-mode)
-        (insert "# STYLE\n\n")
-        (insert "- Return code of full files\n")
-        (insert "- For each file, you must add a file header above the code \n\n")
-        (insert "# CONTEXT\n\n")
-        (pcase-dolist (`(,source . ,data) contexts)
-          (cond
-           ((bufferp source)
-            (let ((file (or (buffer-file-name source)
-                            (format "[buffer] %s" (buffer-name source))))
-                  (lang (format "%s"
-                                (gptel--strip-mode-suffix
-                                 (buffer-local-value 'major-mode source))))
-                  (ovs (seq-filter #'overlayp
-                                   (or (gptel-clip--entry-get data :overlays) data))))
-              (dolist (ov ovs)
-                (setq rendered t)
-                (gptel-clip--insert-block
-                 file
-                 (with-current-buffer source
-                   (save-restriction
-                     (widen)
-                     (buffer-substring-no-properties
-                      (overlay-start ov) (overlay-end ov))))
-                 lang))))
-           ((and (stringp source)
-                 (not (gptel-clip--entry-get data :mime)))
-            (setq rendered t)
-            (gptel-clip--insert-block
-             source
-             (with-temp-buffer
-               (insert-file-contents source)
-               (buffer-string))
-             (or (file-name-extension source) "")))))
-        (unless rendered
-          (insert "_No active gptel context._\n\n"))
-        (insert "# TASK\n")
-        (insert (or saved-task "\n"))
+        (gptel-clip--insert-style)
+        (setq rendered (gptel-clip--insert-context contexts))
+        (gptel-clip--insert-task saved-task)
         (use-local-map (copy-keymap markdown-mode-map))
         (local-set-key (kbd "C-c C-c") #'gptel-clip-copy-and-quit)
         (goto-char (point-min))))
