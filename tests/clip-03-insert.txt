@@ -1,0 +1,11 @@
+<<<<<<< SEARCH
+(provide 'target)
+;;; target.el ends here
+=======
+(defun my-double ()
+  "Double the current counter value."
+  (setq my-counter (* my-counter 2)))
+
+(provide 'target)
+;;; target.el ends here
+>>>>>>> REPLACE

@@ -1,0 +1,9 @@
+<<<<<<< SEARCH
+(defun my-nonexistent ()
+  "This function does not exist in target.el."
+  nil)
+=======
+(defun my-nonexistent ()
+  "Replaced body."
+  t)
+>>>>>>> REPLACE

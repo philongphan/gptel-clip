@@ -1,0 +1,6 @@
+<<<<<<< SEARCH
+(defvar my-counter 0
+  "A simple counter.")
+=======
+(defvar my-counter 42
+  "A simple counter, starting at 42.")

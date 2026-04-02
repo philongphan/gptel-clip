@@ -1,0 +1,26 @@
+# file: target.el
+```emacs-lisp
+;;; target.el --- Sample file used as the patch target
+
+(defvar my-counter 100
+  "A simple counter, starting at 100.")
+
+(defun my-greet (name)
+  "Say hello to NAME."
+  (message "Hello, %s!" name))
+
+(defun my-increment ()
+  "Increment the counter by one."
+  (setq my-counter (+ my-counter 1)))
+
+(defun my-reset ()
+  "Reset the counter to zero."
+  (setq my-counter 0))
+
+(defun my-double ()
+  "Double the counter."
+  (setq my-counter (* my-counter 2)))
+
+(provide 'target)
+;;; target.el ends here
+```

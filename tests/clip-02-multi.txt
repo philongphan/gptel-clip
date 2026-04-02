@@ -1,0 +1,27 @@
+<<<<<<< SEARCH
+(defvar my-counter 0
+  "A simple counter.")
+=======
+(defvar my-counter 0
+  "A simple counter. Shared across all callers.")
+>>>>>>> REPLACE
+
+<<<<<<< SEARCH
+(defun my-increment ()
+  "Increment the counter by one."
+  (setq my-counter (+ my-counter 1)))
+=======
+(defun my-increment (&optional n)
+  "Increment the counter by N (default 1)."
+  (setq my-counter (+ my-counter (or n 1))))
+>>>>>>> REPLACE
+
+<<<<<<< SEARCH
+(defun my-reset ()
+  "Reset the counter to zero."
+  (setq my-counter 0))
+=======
+(defun my-reset (&optional value)
+  "Reset the counter to VALUE (default 0)."
+  (setq my-counter (or value 0)))
+>>>>>>> REPLACE

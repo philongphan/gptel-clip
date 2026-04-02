@@ -1,0 +1,19 @@
+;;; target.el --- Sample file used as the patch target
+
+(defvar my-counter 0
+  "A simple counter.")
+
+(defun my-greet (name)
+  "Say hello to NAME."
+  (message "Howdy, %s!" name))
+
+(defun my-increment ()
+  "Increment the counter by one."
+  (setq my-counter (+ my-counter 1)))
+
+(defun my-reset ()
+  "Reset the counter to zero."
+  (setq my-counter 0))
+
+(provide 'target)
+;;; target.el ends here

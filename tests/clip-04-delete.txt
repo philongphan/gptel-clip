@@ -1,0 +1,9 @@
+<<<<<<< SEARCH
+(defun my-reset ()
+  "Reset the counter to zero."
+  (setq my-counter 0))
+
+(provide 'target)
+=======
+(provide 'target)
+>>>>>>> REPLACE

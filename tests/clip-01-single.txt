@@ -1,0 +1,9 @@
+<<<<<<< SEARCH
+(defun my-greet (name)
+  "Say hello to NAME."
+  (message "Hello, %s!" name))
+=======
+(defun my-greet (name &optional greeting)
+  "Say GREETING (default \"Hello\") to NAME."
+  (message "%s, %s!" (or greeting "Hello") name))
+>>>>>>> REPLACE
