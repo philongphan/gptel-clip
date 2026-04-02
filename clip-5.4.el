@@ -32,7 +32,9 @@
 
 (defun gptel-clip--insert-style ()
   (insert "# STYLE\n\n"
-          "- Return code of full files\n"
+          "- Write code changes as full files if they are short, else indicate the code changes via search/replace blocks."
+          "Use `<<<<<<< SEARCH`, `=======` and `>>>>>>> REPLACE` as delimiters."
+          "IMPORTANT: Each search/replace block MUST be enclosed in fenced code block with 4 backticks on each side.\n"
           "- Instead of explanation, write at the end a git commit message with what has been changed\n"
           "- For each file, you must add a file header above the code\n\n"))
 
