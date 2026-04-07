@@ -7,9 +7,48 @@
   :type 'boolean
   :group 'gptel-clip)
 
+(defcustom gptel-clip-include-project-file t
+  "When non-nil, prepend project.md from the current project to `*clip*`."
+  :type 'boolean
+  :group 'gptel-clip)
+
 (defun gptel-clip--entry-get (data prop)
   (and (listp data) (keywordp (car data))
        (plist-get data prop)))
+
+(defun gptel-clip--project-file ()
+  (require 'project)
+  (let* ((project (project-current nil))
+         (root (and project (project-root project)))
+         (file (and root (expand-file-name "project.md" root))))
+    (and file (file-readable-p file) file)))
+
+(defun gptel-clip--project-text ()
+  (let ((project-file (gptel-clip--project-file)))
+    (when project-file
+      (with-temp-buffer
+        (insert-file-contents project-file)
+        (buffer-string)))))
+
+(defun gptel-clip--sanitize-task-text (text)
+  (let ((project-text (gptel-clip--project-text)))
+    (if (and text project-text
+             (string-match-p "[^[:space:]\n]" project-text))
+        (replace-regexp-in-string
+         (concat "\n*" (regexp-quote (string-trim-right project-text)) "\n*")
+         "\n"
+         text
+         t t)
+      text)))
+
+(defun gptel-clip--insert-project-text ()
+  (when gptel-clip-include-project-file
+    (let ((project-text (gptel-clip--project-text)))
+      (when (and project-text
+                 (string-match-p "[^[:space:]\n]" project-text))
+        (goto-char (point-min))
+        (insert (string-trim-right project-text) "\n\n")
+        t))))
 
 (defun gptel-clip--extract-task-text (buffer)
   (when (buffer-live-p buffer)
@@ -17,7 +56,8 @@
       (save-excursion
         (goto-char (point-min))
         (when (search-forward "# TASK\n" nil t)
-          (buffer-substring-no-properties (point) (point-max)))))))
+          (gptel-clip--sanitize-task-text
+           (buffer-substring-no-properties (point) (point-max))))))))
 
 (defun gptel-clip--insert-block (file body lang)
   (insert (format "## file: %s\n\n```%s\n%s" file lang body))
@@ -32,7 +72,7 @@
 
 (defun gptel-clip--insert-style ()
   (insert "# STYLE\n\n"
-          "- Write code changes as full files if file has <200 lines or multiple changes made on one file. Else indicate the code changes via search/replace blocks." 
+          "- Write code changes as full files if file has <200 lines or multiple changes made on one file. Else indicate the code changes via search/replace blocks."
           "Especially use search/replace blocks when there is only little change on a file."
           "In general prefer using search/replace blocks."
           "Use `<<<<<<< SEARCH`, `=======` and `>>>>>>> REPLACE` as delimiters."
@@ -107,6 +147,7 @@
   (require 'gptel)
   (require 'gptel-context)
   (require 'markdown-mode)
+  (require 'subr-x)
   (let* ((contexts (gptel-context--collect))
          (buf (get-buffer-create "*clip*"))
          (saved-task (and gptel-clip-persist-task
@@ -115,15 +156,18 @@
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
+        (goto-char (point-min))
         (markdown-mode)
+        (gptel-clip--insert-project-text)
         (gptel-clip--insert-style)
         (setq rendered (gptel-clip--insert-context contexts))
         (gptel-clip--insert-task saved-task)
         (use-local-map (copy-keymap markdown-mode-map))
         (local-set-key (kbd "C-c C-c") #'gptel-clip-copy-and-quit)
         (outline-hide-sublevels 2)
-        (goto-char (point-max))))    (if rendered
-      (progn
-        (pop-to-buffer buf)
-        (message "Updated *clip*. Press C-c C-c to copy to clipboard and close."))
+        (goto-char (point-max))))
+    (if rendered
+        (progn
+          (pop-to-buffer buf)
+          (message "Updated *clip*. Press C-c C-c to copy to clipboard and close."))
       (message "No active gptel context right now."))))
