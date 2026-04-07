@@ -32,7 +32,9 @@
 
 (defun gptel-clip--insert-style ()
   (insert "# STYLE\n\n"
-          "- Write code changes as full files if they are short, else indicate the code changes via search/replace blocks."
+          "- Write code changes as full files if file has <200 lines or multiple changes made on one file. Else indicate the code changes via search/replace blocks." 
+          "Especially use search/replace blocks when there is only little change on a file."
+          "In general prefer using search/replace blocks."
           "Use `<<<<<<< SEARCH`, `=======` and `>>>>>>> REPLACE` as delimiters."
           "IMPORTANT: Each search/replace block MUST be enclosed in fenced code block with 4 backticks on each side.\n"
           "- Instead of explanation, write at the end a git commit message with what has been changed\n"
@@ -90,6 +92,16 @@
   (insert "# TASK\n")
   (insert (or saved-task "\n")))
 
+(defun gptel-clip-add-file-to-context (file)
+  (interactive "fAdd file to gptel context: ")
+  (require 'gptel)
+  (require 'gptel-context)
+  (gptel-context-add-file (expand-file-name file))
+  (message "Added %s to gptel context" (abbreviate-file-name file)))
+
+(with-eval-after-load 'embark
+  (define-key embark-file-map (kbd "z") #'gptel-clip-add-file-to-context))
+
 (defun gptel-clip ()
   (interactive)
   (require 'gptel)
@@ -109,9 +121,9 @@
         (gptel-clip--insert-task saved-task)
         (use-local-map (copy-keymap markdown-mode-map))
         (local-set-key (kbd "C-c C-c") #'gptel-clip-copy-and-quit)
-        (goto-char (point-min))))
-    (if rendered
-        (progn
-          (pop-to-buffer buf)
-          (message "Updated *clip*. Press C-c C-c to copy to clipboard and close."))
+        (outline-hide-sublevels 2)
+        (goto-char (point-max))))    (if rendered
+      (progn
+        (pop-to-buffer buf)
+        (message "Updated *clip*. Press C-c C-c to copy to clipboard and close."))
       (message "No active gptel context right now."))))
