@@ -118,6 +118,18 @@ Errors if any search string is not found."
   (with-current-buffer buf
     (buffer-substring-no-properties (point-min) (point-max))))
 
+(defun gptel-patch--buffer-display (buf)
+  (with-current-buffer buf
+    (or (buffer-file-name buf)
+        (format "[buffer] %s" (buffer-name buf)))))
+
+(defun gptel-patch--buffer-item (buf text &optional save)
+  (list :type 'buffer
+        :buffer buf
+        :display (gptel-patch--buffer-display buf)
+        :text text
+        :save save))
+
 (defun gptel-patch--replace-text (buf text)
   (with-current-buffer buf
     (let ((inhibit-read-only t))
@@ -194,60 +206,29 @@ Errors if any search string is not found."
 ;;; ── Entry point ──────────────────────────────────────────────────────────────
 
 (defun gptel-patch ()
-  "Apply clipboard content as a patch to one or more buffers/files.
-
-Three clipboard formats are recognised, tried in order:
-
-1. SEARCH/REPLACE blocks (Aider-style) — applied to the current buffer:
-
-     <<<<<<< SEARCH
-     exact text to find
-     =======
-     replacement text
-     >>>>>>> REPLACE
-
-   Multiple blocks are applied in sequence; the combined result is shown
-   as a single unified diff for review.
-
-2. Fenced code blocks preceded by '# file: PATH' headers — each block
-   replaces the entire content of the named file:
-
-     # file: src/foo.el
-     ```emacs-lisp
-     ;; full new content
-     ```
-
-   Multiple file sections are queued and reviewed one at a time.
-
-3. Raw text (no fences, no SEARCH markers) — replaces the entire current
-   buffer, shown as a diff for review."
+  "Replace the current buffer with raw clipboard text and review the diff.
+Clipboard content is treated as plain buffer text with no parsing."
   (interactive)
-  (let* ((text (gptel-patch--clipboard)))
-    (cond
-     ;; ── Format 1: search/replace blocks ──
-     ((gptel-patch--search-replace-p text)
-      (let* ((pairs    (gptel-patch--parse-search-replace text))
-             (buf      (current-buffer))
-             (new-text (gptel-patch--apply-search-replace
-                        (gptel-patch--buffer-text buf) pairs))
-             (item     (list :type    'buffer
-                             :buffer  buf
-                             :display (or (buffer-file-name buf)
-                                          (format "[buffer] %s" (buffer-name buf)))
-                             :text    new-text
-                             :save    nil)))
-        (gptel-patch--show item nil)))
-     ;; ── Format 2: fenced file blocks ──
-     ((string-match-p "```" text)
-      (let ((items (gptel-patch--parse-blocks text)))
-        (gptel-patch--show (car items) (cdr items))))
-     ;; ── Format 3: raw text → replace current buffer ──
-     (t
-      (gptel-patch--show
-       (list :type    'buffer
-             :buffer  (current-buffer)
-             :display (or (buffer-file-name)
-                          (format "[buffer] %s" (buffer-name)))
-             :text    text
-             :save    nil)
-       nil)))))
+  (gptel-patch--show
+   (gptel-patch--buffer-item (current-buffer)
+                             (gptel-patch--clipboard))
+   nil))
+
+(defun gptel-patch-all ()
+  "Apply fenced file blocks from the clipboard.
+Each '# file: PATH' header must be followed by a fenced code block."
+  (interactive)
+  (let ((items (gptel-patch--parse-blocks (gptel-patch--clipboard))))
+    (gptel-patch--show (car items) (cdr items))))
+
+(defun gptel-patch-search-replace ()
+  "Apply SEARCH/REPLACE blocks from the clipboard to the current buffer."
+  (interactive)
+  (let* ((buf      (current-buffer))
+         (pairs    (gptel-patch--parse-search-replace
+                    (gptel-patch--clipboard)))
+         (new-text (gptel-patch--apply-search-replace
+                    (gptel-patch--buffer-text buf) pairs)))
+    (gptel-patch--show
+     (gptel-patch--buffer-item buf new-text)
+     nil)))
