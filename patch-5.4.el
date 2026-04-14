@@ -28,39 +28,41 @@
   (let ((s (string-trim s)))
     (when (string-match "\\`\\(?:#+\\s-*\\)?file:\\s-*\\(.+\\)\\'" s)
       (match-string 1 s))))
-
+(defun gptel-patch--file-item (file text)
+  (list :type 'file
+        :file file
+        :display file
+        :text (replace-regexp-in-string "\n`+\\'" "" text)
+        :save gptel-patch-save-file-targets))
 (defun gptel-patch--parse-blocks (text)
   "Parse TEXT for fenced code blocks preceded by '# file: PATH' headers.
 Returns a list of patch items with :type 'file."
-  (let (items pending current inside lines)
-    (dolist (line (split-string text "\n"))
-      (if inside
-          (if (gptel-patch--fence-p line)
-              (progn
-                (push (list :type 'file
-                            :file current
-                            :display current
-                            :text (string-join (nreverse lines) "\n")
-                            :save gptel-patch-save-file-targets)
-                      items)
-                (setq inside nil current nil lines nil))
-            (push line lines))
-        (let ((path (gptel-patch--file-path line)))
-          (cond
-           (path
-            (setq pending path))
-           ((gptel-patch--fence-p line)
-            (unless pending
-              (user-error "Found fenced block without preceding file: header"))
-            (setq inside t current pending pending nil lines nil))
-           ((string-blank-p line))
-           (t
-            (setq pending nil))))))
-    (when inside
-      (user-error "Unclosed fenced code block in clipboard"))
+  (let (items)
+    (with-temp-buffer
+      (insert text)
+      (goto-char (point-min))
+      (while (not (eobp))
+        (let ((path (gptel-patch--file-path
+                     (buffer-substring (line-beginning-position)
+                                       (line-end-position)))))
+          (if (not path)
+              (forward-line 1)
+            (forward-line 1)
+            (unless (gptel-patch--fence-p
+                     (buffer-substring (line-beginning-position)
+                                       (line-end-position)))
+              (user-error "Found file: header without following fenced block"))
+            (forward-line 1)
+            (let ((block-start (point)))
+              (unless (re-search-forward "^```" nil t)
+                (user-error "Unclosed fenced code block in clipboard"))
+              (push (gptel-patch--file-item
+                     path
+                     (buffer-substring-no-properties
+                      block-start (line-beginning-position)))
+                    items))))))
     (or (nreverse items)
         (user-error "No fenced file sections found in clipboard"))))
-
 ;;; ── Search/replace format helpers ────────────────────────────────────────────
 
 (defconst gptel-patch--sr-search  "<<<<<<< SEARCH")
@@ -123,13 +125,31 @@ Errors if any search string is not found."
     (or (buffer-file-name buf)
         (format "[buffer] %s" (buffer-name buf)))))
 
-(defun gptel-patch--buffer-item (buf text &optional save)
+(defun gptel-patch--region-bounds (&optional buf)
+  (with-current-buffer (or buf (current-buffer))
+    (when (use-region-p)
+      (cons (region-beginning) (region-end)))))
+
+(defun gptel-patch--context-text (buf &optional bounds)
+  (with-current-buffer buf
+    (if bounds
+        (buffer-substring-no-properties (car bounds) (cdr bounds))
+      (gptel-patch--buffer-text buf))))
+
+(defun gptel-patch--replace-region-text (buf text bounds)
+  (with-current-buffer buf
+    (concat (buffer-substring-no-properties (point-min) (car bounds))
+            text
+            (buffer-substring-no-properties (cdr bounds) (point-max)))))
+
+(defun gptel-patch--buffer-item (buf text &optional save bounds)
   (list :type 'buffer
         :buffer buf
         :display (gptel-patch--buffer-display buf)
-        :text text
+        :text (if bounds
+                  (gptel-patch--replace-region-text buf text bounds)
+                text)
         :save save))
-
 (defun gptel-patch--replace-text (buf text)
   (with-current-buffer buf
     (let ((inhibit-read-only t))
@@ -151,8 +171,8 @@ Errors if any search string is not found."
 
 (defun gptel-patch--show (item rest)
   (let* ((buf (gptel-patch--target-buffer item))
-         (old (make-temp-file "gptel-patch-old-"))
-         (new (make-temp-file "gptel-patch-new-")))
+         (old (make-temp-file "old-"))
+         (new (make-temp-file "new-")))
     (with-temp-file old (insert (gptel-patch--buffer-text buf)))
     (with-temp-file new (insert (plist-get item :text)))
     (let ((dbuf (diff-no-select old new "-u" 'noasync)))
@@ -206,14 +226,17 @@ Errors if any search string is not found."
 ;;; ── Entry point ──────────────────────────────────────────────────────────────
 
 (defun gptel-patch ()
-  "Replace the current buffer with raw clipboard text and review the diff.
+  "Replace the active region, or the current buffer, with raw clipboard text.
 Clipboard content is treated as plain buffer text with no parsing."
   (interactive)
-  (gptel-patch--show
-   (gptel-patch--buffer-item (current-buffer)
-                             (gptel-patch--clipboard))
-   nil))
-
+  (let* ((buf    (current-buffer))
+         (bounds (gptel-patch--region-bounds buf)))
+    (gptel-patch--show
+     (gptel-patch--buffer-item buf
+                               (gptel-patch--clipboard)
+                               nil
+                               bounds)
+     nil)))
 (defun gptel-patch-all ()
   "Apply fenced file blocks from the clipboard.
 Each '# file: PATH' header must be followed by a fenced code block."
@@ -222,13 +245,14 @@ Each '# file: PATH' header must be followed by a fenced code block."
     (gptel-patch--show (car items) (cdr items))))
 
 (defun gptel-patch-search-replace ()
-  "Apply SEARCH/REPLACE blocks from the clipboard to the current buffer."
+  "Apply SEARCH/REPLACE blocks from the clipboard to the active region or current buffer."
   (interactive)
   (let* ((buf      (current-buffer))
+         (bounds   (gptel-patch--region-bounds buf))
          (pairs    (gptel-patch--parse-search-replace
                     (gptel-patch--clipboard)))
          (new-text (gptel-patch--apply-search-replace
-                    (gptel-patch--buffer-text buf) pairs)))
+                    (gptel-patch--context-text buf bounds) pairs)))
     (gptel-patch--show
-     (gptel-patch--buffer-item buf new-text)
+     (gptel-patch--buffer-item buf new-text nil bounds)
      nil)))
